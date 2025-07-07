@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Minesweeper </title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #cea6a6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .panel { 
+      /* it contains mines smiley and timer  */
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: fit-content;
+      padding: 5px;
+      background: #ccc;
+      border: 3px solid #777;
+      gap: 10px;
+    }
+    .counter, .timer { 
+      background: black;
+      color: rgb(211, 40, 40);
+      padding: 5px;
+      font-size: 24px;
+      width: 60px;
+      text-align: center;
+    }
+    .smiley {
+      cursor: pointer;
+      font-size: 28px;
+    }
+    table {
+      border-collapse: collapse;
+      margin-top: 5px;
+    }
+    td { 
+      width: 25px; height: 25px;
+      text-align: center; vertical-align: middle;
+      border-top: 2px solid #fff;
+      border-left: 2px solid #fff;
+      border-bottom: 2px solid #777;
+      border-right: 2px solid #777;
+      background: #ccc; user-select: none;
+      cursor: pointer; font-weight: bold;
+    }
+    td.revealed { background: #ddd; border: 1px solid #999; }
+    td.mine { background: red; }
+    .num-1 { color: blue; }
+    .num-2 { color: green; }
+    .num-3 { color: red; }
+    .num-4 { color: darkblue; }
+    .stats { 
+      background: #333;
+      color: #ddd;
+      margin-top: 10px;
+      padding: 10px;
+      border: 2px solid #555;
+      width: fit-content;
+      font-size: 14px;
+    }
+    .controls button {
+      margin: 5px;
+      padding: 5px 10px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<h2>Minesweeper</h2>
+<label for="level">Select Level:</label>
+<select id="level" onchange="updateInputs()">
+  <option value="beginner">Beginner (9x9, 10 mines)</option>
+  <option value="intermediate">Intermediate (16x16, 40 mines)</option>
+  <option value="expert">Expert (30x16, 99 mines)</option>
+  <option value="custom">Custom</option>
+</select>
+<div id="customInputs" style="display: none;">
+  Rows: <input type="number" id="customRows" value="9" min="5" max="50">
+  Columns: <input type="number" id="customCols" value="9" min="5" max="50">
+  Mines: <input type="number" id="customMines" value="10" min="1">
+</div>
+<button onclick="startGame()">Start Game</button>
+
+<div class="panel">
+  <div class="counter" id="mineCounter">000</div>
+  <div class="smiley" id="smiley" onclick="startGame()"> 😊 </div>
+  <div class="timer" id="timer">000</div>
+</div>
+
+<div id="board"></div>
+
+<div class="stats" id="statsPanel">
+  Time: <span id="statTime">0s</span><br>
+  Estimated Time: <span id="statEstTime">0s</span><br>
+  3BV: <span id="stat3BV">0 / 0</span><br>
+  3BV/s: <span id="stat3BVps">0</span><br>
+  Clicks: <span id="statClicks">0</span><br>
+  Efficiency: <span id="statEfficiency">0%</span>
+</div>
+
+<div class="controls">
+  <button onclick="startGame()"> Restart</button>
+  <button onclick="replayGame()"> Replay</button> 
+</div>
+
+<script>
+  let rows, cols, mines;
+  let board = [], revealed = [], flags = []; 
+  let mineCounter = mines, timer = 0, interval, gameOver = false, timerStarted = false;
+  let clicks = 0;// number of clicks made by the player
+  let replayMoves = [];
+  let replayInterval;
+
+  function updateInputs() {
+    const level = document.getElementById('level').value;
+    document.getElementById('customInputs').style.display = (level === 'custom') ? 'block' : 'none'; //make the elem visible or hides the element 
+  }
+
+  function getLevelSettings() {
+    const level = document.getElementById('level').value;
+    if (level === 'beginner') return { rows: 9, cols: 9, mines: 10 };
+    if (level === 'intermediate') return { rows: 16, cols: 16, mines: 40 };
+    if (level === 'expert') return { rows: 16, cols: 30, mines: 99 };
+    if (level === 'custom') {
+      return {
+        rows: parseInt(document.getElementById('customRows').value),
+        cols: parseInt(document.getElementById('customCols').value),
+        mines: parseInt(document.getElementById('customMines').value)
+      };
+    }
+  }
+
+  function startGame() {
+    clearInterval(interval);
+    clearInterval(replayInterval);
+    timer = 0; clicks = 0; timerStarted = false; gameOver = false;
+    replayMoves = [];// reset replay moves
+    const settings = getLevelSettings(); 
+    rows = settings.rows; cols = settings.cols; mines = settings.mines;
+
+    document.getElementById('timer').innerText = '000';
+    document.getElementById('mineCounter').innerText = mines.toString().padStart(3, '0'); // padStart it is always 3 digits
+    document.getElementById('smiley').innerText = '😊';
+
+    board = Array.from({ length: rows }, () => Array(cols).fill(0));// create a 2D array filled with 0s
+    revealed = Array.from({ length: rows }, () => Array(cols).fill(false));
+    flags = Array.from({ length: rows }, () => Array(cols).fill(false));
+
+    let placed = 0;
+    while (placed < mines) { // place mines randomly
+      let r = Math.floor(Math.random() * rows); 
+      let c = Math.floor(Math.random() * cols);
+      if (board[r][c] !== 'M') { board[r][c] = 'M'; placed++; }
+    }
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) { //traverse row and cols
+        if (board[r][c] === 'M') continue;
+        //else no mines count surrounding mines
+        let count = 0;
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {//-1 for up and left 0 for no change and 1 for down and right
+            if (dr === 0 && dc === 0) continue; // skip the cell
+            let nr = r + dr, nc = c + dc; 
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && board[nr][nc] === 'M') count++; // check bounds and count mines
+          }
+        }
+        board[r][c] = count; 
+      }
+    }
+
+    renderBoard(); 
+    mineCounter = mines; 
+    updateStats();
+  }
+
+  function renderBoard() {
+    let html = '<table>'; // create a table for the board
+    for (let r = 0; r < rows; r++) {
+      html += '<tr>'; // create a new row
+      for (let c = 0; c < cols; c++) {
+        html += `<td id="cell-${r}-${c}" onclick="clickCell(event,${r},${c})"></td>`; // create a cell with an onclick event
+      }
+      html += '</tr>';
+    }
+    html += '</table>';
+    document.getElementById('board').innerHTML = html; 
+  }
+
+  function clickCell(e, r, c, isReplay = false) { 
+    if (gameOver || revealed[r][c]) return;
+
+    if (!isReplay) replayMoves.push([r, c]);
+
+    if (!timerStarted) {
+      interval = setInterval(() => {
+        timer++;
+        document.getElementById('timer').innerText = timer.toString().padStart(3, '0');
+        updateStats();
+      }, 1000);
+      timerStarted = true;
+    }
+
+    clicks++;
+    updateStats();
+
+    if (e.shiftKey || e.ctrlKey) {
+      flags[r][c] = !flags[r][c];
+      let cell = document.getElementById(`cell-${r}-${c}`); // get the cell element
+      if (flags[r][c]) {
+        cell.innerHTML = '🚩';
+        mineCounter--;
+      } else {
+        cell.innerHTML = '';
+        mineCounter++;
+      }
+      document.getElementById('mineCounter').innerText = mineCounter.toString().padStart(3, '0');
+      return;
+    }
+
+    if (flags[r][c]) return;
+
+    if (board[r][c] === 'M') {
+      revealed[r][c] = true;
+      let cell = document.getElementById(`cell-${r}-${c}`);
+      cell.classList.add('revealed', 'mine');
+      cell.innerHTML = '💣';
+      revealAllMines();
+      document.getElementById('smiley').innerText = '😵';
+      clearInterval(interval);
+      gameOver = true;
+    } else if (board[r][c] > 0) {
+      revealed[r][c] = true;
+      let cell = document.getElementById(`cell-${r}-${c}`);
+      cell.classList.add('revealed', `num-${board[r][c]}`);
+      cell.innerText = board[r][c];
+    } else {
+      bfsReveal(r, c);
+    }
+
+    checkWin();
+  }
+
+  function bfsReveal(r, c) {
+    let queue = [];
+    queue.push([r, c]);
+
+    while (queue.length > 0) {
+      let [currR, currC] = queue.shift(); //elem from queue nikalna
+
+      if (revealed[currR][currC]) continue;
+
+      revealed[currR][currC] = true; // mark as reveal h toh double click
+      let cell = document.getElementById(`cell-${currR}-${currC}`);
+      cell.classList.add('revealed');
+
+      if (board[currR][currC] > 0) { //if there is mines number and colour show kro
+        cell.innerText = board[currR][currC];
+        cell.classList.add(`num-${board[currR][currC]}`);
+      } else { //if no mines around, reveal surrounding cells
+        for (let dr = -1; dr <= 1; dr++) { 
+          for (let dc = -1; dc <= 1; dc++) {
+            let nr = currR + dr, nc = currC + dc; //dr deltarow s=0 high=-1 low=1
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) { // check bounds
+              if (!revealed[nr][nc] && !flags[nr][nc]) {
+                queue.push([nr, nc]); // add to queue for further processing
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function revealAllMines() {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (board[r][c] === 'M') {
+          let cell = document.getElementById(`cell-${r}-${c}`); //get the value of that cell
+          cell.innerHTML = '💣';
+        }
+      }
+    }
+  }
+
+  function checkWin() {
+    let totalSafe = rows * cols - mines;
+    let revealedCount = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (revealed[r][c]) revealedCount++; // count revealed cells
+      }
+    }
+    if (revealedCount === totalSafe) {
+      clearInterval(interval);
+      gameOver = true;
+      document.getElementById('smiley').innerText = '😎';
+      alert(`🎉 You Win! Time: ${timer}s`);
+    }
+  }
+
+  function updateStats() {
+    document.getElementById('statTime').innerText = timer + "s";
+    document.getElementById('statEstTime').innerText = (rows * cols / 4).toFixed(2) + "s";
+    document.getElementById('stat3BV').innerText = `${Math.floor((rows * cols - mines) / 3)} / ${rows * cols}`; // 3BV = Basic Value
+    document.getElementById('stat3BVps').innerText = (timer > 0 ? (Math.floor((rows * cols - mines) / 3) / timer).toFixed(3) : "0");
+    document.getElementById('statClicks').innerText = clicks;
+    let efficiency = (clicks > 0 ? Math.min(100, Math.floor(((rows * cols - mines) / clicks) * 100)) : 0);
+    document.getElementById('statEfficiency').innerText = efficiency + "%";
+  }
+
+  function replayGame() {
+    if (replayMoves.length === 0) {
+      alert("No moves to replay!");
+      return;
+    }
+    clearInterval(interval);
+    clearInterval(replayInterval);
+    timer = 0; clicks = 0; gameOver = false; timerStarted = false;
+    revealed = Array.from({ length: rows }, () => Array(cols).fill(false));
+    flags = Array.from({ length: rows }, () => Array(cols).fill(false));
+    renderBoard();
+    document.getElementById('smiley').innerText = '😊';
+
+    let i = 0;
+    replayInterval = setInterval(() => {
+      if (i >= replayMoves.length) {
+        clearInterval(replayInterval); // stop replaying
+        return;
+      }
+      let [r, c] = replayMoves[i];
+      clickCell(new Event('click'), r, c, true);
+      i++;
+    }, 300);
+  }
+
+  startGame();
+</script>
+</body>
+</html>
