@@ -1,5 +1,4 @@
 # Minesweeper 
-
 A simple web version of Minesweeper using HTML, CSS & JavaScript.
 
 ## How to Play
